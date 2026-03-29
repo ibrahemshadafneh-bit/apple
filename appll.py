@@ -119,3 +119,31 @@ with st.form("registration_form"):
         else:
             # كود إضافة البيانات الجديدة هنا
             st.success("تم التسجيل بنجاح!")
+import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+
+# الاتصال بالشيت
+conn = st.connection("gsheets", type=GSheetsConnection)
+df = conn.read(worksheet="Sheet1")
+
+st.divider() # خط فاصل
+st.subheader("إدارة المسجلين (حذف شخص)")
+
+# قائمة بأسماء الأشخاص المسجلين عشان تختار منهم
+names_list = df['Name'].tolist()
+
+if names_list:
+    selected_person = st.selectbox("اختر الشخص اللي بدك تحذفه:", names_list)
+
+    if st.button("حذف الشخص المحدد", type="primary"):
+        # حذف السطر اللي فيه الاسم المختار
+        updated_df = df[df['Name'] != selected_person]
+        
+        # تحديث الجوجل شيت بالبيانات الجديدة
+        conn.update(worksheet="Sheet1", data=updated_df)
+        
+        st.success(f"تم حذف {selected_person} بنجاح!")
+        # إعادة تحميل الصفحة عشان يختفي الاسم فوراً
+        st.rerun()
+else:
+    st.info("لا يوجد أشخاص مسجلين حالياً.")
