@@ -18,18 +18,20 @@ st.markdown("""
 st.title("🗄️ نظام تنظيم ملفات الوالد")
 
 # 3. إعداد الاتصال بـ Google Sheets
-# تأكد إنك أضفت الرابط في الـ Secrets كما شرحنا سابقاً
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
-    return conn.read(worksheet="Sheet1")
+    # محاولة قراءة البيانات، إذا فشل بنرجع جدول فاضي بالعناوين المطلوبة
+    try:
+        data = conn.read(worksheet="Sheet1", ttl="0s")
+        if data is None or data.empty:
+            return pd.DataFrame(columns=["Name", "Size", "Color", "Location"])
+        return data
+    except:
+        return pd.DataFrame(columns=["Name", "Size", "Color", "Location"])
 
 # تحميل البيانات الحالية
-try:
-    df_existing = get_data()
-except:
-    # إذا الشيت فاضية تماماً، بنسوي إطار بيانات وهمي عشان ما يعلق الكود
-    df_existing = pd.DataFrame(columns=["Name", "Size", "Color", "Location"])
+df_existing = get_data()
 
 # --- قسم إضافة ملف جديد ---
 with st.expander("➕ إضافة ملف جديد للنظام", expanded=True):
@@ -37,7 +39,7 @@ with st.expander("➕ إضافة ملف جديد للنظام", expanded=True):
         col1, col2 = st.columns(2)
         with col1:
             full_name = st.text_input("שם מלא (الاسم الكامل بالعبرية)")
-            size = st.selectbox("גודל (الحجم)", ["גדול", "בינוני", "קטן"])
+            size = st.selectbox("גودل (الحجم)", ["גדול", "בינוני", "קטן"])
         with col2:
             color_options = ["أسود", "أبيض", "رمادي", "أحمر", "بوردو", "أزرق", "أزرق سماوي", "أصفر", "ليلكي", "أخضر", "برتقالي"]
             color = st.selectbox("اللون", color_options)
@@ -47,8 +49,13 @@ with st.expander("➕ إضافة ملف جديد للنظام", expanded=True):
 
         if submit:
             if full_name:
-                # فحص التكرار
-                if not df_existing.empty and full_name in df_existing['Name'].values:
+                # فحص التكرار (فقط إذا الجدول مش فاضي)
+                is_duplicate = False
+                if not df_existing.empty and "Name" in df_existing.columns:
+                    if full_name in df_existing['Name'].values:
+                        is_duplicate = True
+
+                if is_duplicate:
                     st.error(f"الاسم '{full_name}' مسجل مسبقاً!")
                 else:
                     new_entry = pd.DataFrame([{
@@ -57,7 +64,9 @@ with st.expander("➕ إضافة ملف جديد للنظام", expanded=True):
                         "Color": color,
                         "Location": closet
                     }])
+                    # دمج البيانات الجديدة مع القديمة
                     updated_df = pd.concat([df_existing, new_entry], ignore_index=True)
+                    # رفع التحديث لجوجل شيت
                     conn.update(worksheet="Sheet1", data=updated_df)
                     st.success(f"تم حفظ {full_name} بنجاح!")
                     st.balloons()
@@ -69,15 +78,15 @@ with st.expander("➕ إضافة ملف جديد للنظام", expanded=True):
 st.divider()
 st.subheader("🔍 استعراض وبحث في الملفات")
 
-if not df_existing.empty:
+if not df_existing.empty and "Name" in df_existing.columns:
     search_query = st.text_input("ابحث عن اسم هنا...")
     
-    # ترتيب البيانات: حسب الحجم ثم الاسم
-    df_existing['Size'] = pd.Categorical(df_existing['Size'], categories=["גדול", "בינוني", "קטן"], ordered=True)
+    # تحويل الحجم لفئة مرتبة عشان يظهر الكبير فوق
+    df_existing['Size'] = pd.Categorical(df_existing['Size'], categories=["גדול", "בינוני", "קטن"], ordered=True)
     df_display = df_existing.sort_values(by=["Size", "Name"])
 
     if search_query:
-        df_display = df_display[df_display['Name'].str.contains(search_query, case=False, na=False)]
+        df_display = df_display[df_display['Name'].astype(str).str.contains(search_query, case=False, na=False)]
 
     st.table(df_display)
 
