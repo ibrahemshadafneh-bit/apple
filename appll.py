@@ -96,4 +96,26 @@ if st.session_state.data:
             os.remove(DATA_FILE)
         st.rerun()
 else:
-    st.info("النظام فارغ حالياً، ابدأ بإضافة الملفات من الأعلى.")
+    st.info("النظام فارغ حالياً، ابدأ بإضافة الملفات من الأعلى.")import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+
+# إعداد الاتصال بـ Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# قراءة البيانات الحالية
+existing_data = conn.read(worksheet="Sheet1")
+
+st.title("تسجيل البيانات")
+
+with st.form("registration_form"):
+    name = st.text_input("الاسم الكامل")
+    # ... باقي الحقول
+    submit = st.form_submit_button("تسجيل")
+
+    if submit:
+        # فحص إذا الاسم موجود مسبقاً في عمود 'Name'
+        if name in existing_data['Name'].values:
+            st.error("هذا الشخص مسجل مسبقاً!")
+        else:
+            # كود إضافة البيانات الجديدة هنا
+            st.success("تم التسجيل بنجاح!")
