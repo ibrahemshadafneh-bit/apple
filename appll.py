@@ -1,23 +1,11 @@
 import streamlit as st
 import pandas as pd
-import os
+from streamlit_gsheets import GSheetsConnection
 
-# ملف الحفظ الدائم على جهازك
-DATA_FILE = "data_storage.csv"
-
-def load_data():
-    if os.path.exists(DATA_FILE):
-        return pd.read_csv(DATA_FILE).to_dict('records')
-    return []
-
-def save_data(data):
-    df = pd.DataFrame(data)
-    df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
-
-# إعداد الصفحة
+# 1. إعداد الصفحة
 st.set_page_config(page_title="نظام أرشفة إبراهيم الاحترافي", layout="wide")
 
-# كود لتعديل الاتجاه لليمين RTL ليناسب العربية والعبرية
+# 2. تصميم الواجهة (RTL)
 st.markdown("""
     <style>
     .stApp { text-align: right; direction: rtl; }
@@ -29,121 +17,79 @@ st.markdown("""
 
 st.title("🗄️ نظام تنظيم ملفات الوالد")
 
-if 'data' not in st.session_state:
-    st.session_state.data = load_data()
+# 3. إعداد الاتصال بـ Google Sheets
+# تأكد إنك أضفت الرابط في الـ Secrets كما شرحنا سابقاً
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+def get_data():
+    return conn.read(worksheet="Sheet1")
+
+# تحميل البيانات الحالية
+try:
+    df_existing = get_data()
+except:
+    # إذا الشيت فاضية تماماً، بنسوي إطار بيانات وهمي عشان ما يعلق الكود
+    df_existing = pd.DataFrame(columns=["Name", "Size", "Color", "Location"])
 
 # --- قسم إضافة ملف جديد ---
 with st.expander("➕ إضافة ملف جديد للنظام", expanded=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        full_name = st.text_input("שם מלא (الاسم الكامل بالعبرية)")
-        size = st.selectbox("גודל (الحجم)", ["גדול", "بيנוני", "קטן"])
-    with col2:
-        # قائمة الألوان باللغة العربية كما طلبت
-        color_options = [
-            "أسود", "أبيض", "رمادي", "أحمر", "بوردو", 
-            "أزرق", "أزرق سماوي", "أصفر", "ليلكي", "أخضر", "برتقالي"
-        ]
-        color = st.selectbox("اللون", color_options)
-        closet = st.text_input("مكان الملف (الخزانة)")
-    
-    if st.button("حفظ الملف في القاعدة"):
-        if full_name:
-            new_entry = {
-                "שם מלא": full_name,
-                "الحجم": size,
-                "اللون": color,
-                "المكان": closet
-            }
-            st.session_state.data.append(new_entry)
-            save_data(st.session_state.data)
-            st.success(f"تم حفظ ملف {full_name} بنجاح!")
-            st.balloons()
-        else:
-            st.error("الرجاء إدخال الاسم أولاً!")
+    with st.form("add_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            full_name = st.text_input("שם מלא (الاسم الكامل بالعبرية)")
+            size = st.selectbox("גודל (الحجم)", ["גדול", "בינוני", "קטן"])
+        with col2:
+            color_options = ["أسود", "أبيض", "رمادي", "أحمر", "بوردو", "أزرق", "أزرق سماوي", "أصفر", "ليلكي", "أخضر", "برتقالي"]
+            color = st.selectbox("اللون", color_options)
+            closet = st.text_input("مكان الملف (الخزانة)")
+        
+        submit = st.form_submit_button("حفظ الملف في القاعدة")
 
-# --- البحث والجدول المرتب ---
-if st.session_state.data:
-    st.divider()
-    st.subheader("🔍 البحث في الملفات المرتبة (حسب الحجم ثم الأبجدية)")
-    
+        if submit:
+            if full_name:
+                # فحص التكرار
+                if not df_existing.empty and full_name in df_existing['Name'].values:
+                    st.error(f"الاسم '{full_name}' مسجل مسبقاً!")
+                else:
+                    new_entry = pd.DataFrame([{
+                        "Name": full_name,
+                        "Size": size,
+                        "Color": color,
+                        "Location": closet
+                    }])
+                    updated_df = pd.concat([df_existing, new_entry], ignore_index=True)
+                    conn.update(worksheet="Sheet1", data=updated_df)
+                    st.success(f"تم حفظ {full_name} بنجاح!")
+                    st.balloons()
+                    st.rerun()
+            else:
+                st.error("الرجاء إدخال الاسم!")
+
+# --- عرض البيانات والبحث ---
+st.divider()
+st.subheader("🔍 استعراض وبحث في الملفات")
+
+if not df_existing.empty:
     search_query = st.text_input("ابحث عن اسم هنا...")
-
-    df = pd.DataFrame(st.session_state.data)
     
-    # 1. الترتيب حسب الحجم (كبير، متوسط، صغير)
-    df['الحجم'] = pd.Categorical(df['الحجم'], categories=["גדול", "بيנוني", "קטן"], ordered=True)
-    
-    # 2. الترتيب داخل كل حجم حسب الاسم أبجدياً (א-ת)
-    df_sorted = df.sort_values(by=["الحجم", "שם מלא"]).reset_index(drop=True)
+    # ترتيب البيانات: حسب الحجم ثم الاسم
+    df_existing['Size'] = pd.Categorical(df_existing['Size'], categories=["גדול", "בינוني", "קטן"], ordered=True)
+    df_display = df_existing.sort_values(by=["Size", "Name"])
 
-    # 3. تصفية البحث إذا كتب المستخدم شيئاً
     if search_query:
-        df_display = df_sorted[df_sorted['שם מלא'].str.contains(search_query, case=False, na=False)]
-    else:
-        df_display = df_sorted
+        df_display = df_display[df_display['Name'].str.contains(search_query, case=False, na=False)]
 
-    if not df_display.empty:
-        # عرض الجدول بشكل أنيق
-        st.table(df_display)
-    else:
-        st.warning("لم يتم العثور على نتائج تطابق هذا الاسم.")
+    st.table(df_display)
 
-    # خيار مسح البيانات
-    if st.button("تفريغ النظام نهائياً"):
-        st.session_state.data = []
-        if os.path.exists(DATA_FILE):
-            os.remove(DATA_FILE)
-        st.rerun()
-else:
-    st.info("النظام فارغ حالياً، ابدأ بإضافة الملفات من الأعلى.")import streamlit as st
-from streamlit_gsheets import GSheetsConnection
-
-# إعداد الاتصال بـ Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-# قراءة البيانات الحالية
-existing_data = conn.read(worksheet="Sheet1")
-
-st.title("تسجيل البيانات")
-
-with st.form("registration_form"):
-    name = st.text_input("الاسم الكامل")
-    # ... باقي الحقول
-    submit = st.form_submit_button("تسجيل")
-
-    if submit:
-        # فحص إذا الاسم موجود مسبقاً في عمود 'Name'
-        if name in existing_data['Name'].values:
-            st.error("هذا الشخص مسجل مسبقاً!")
-        else:
-            # كود إضافة البيانات الجديدة هنا
-            st.success("تم التسجيل بنجاح!")
-import streamlit as st
-from streamlit_gsheets import GSheetsConnection
-
-# الاتصال بالشيت
-conn = st.connection("gsheets", type=GSheetsConnection)
-df = conn.read(worksheet="Sheet1")
-
-st.divider() # خط فاصل
-st.subheader("إدارة المسجلين (حذف شخص)")
-
-# قائمة بأسماء الأشخاص المسجلين عشان تختار منهم
-names_list = df['Name'].tolist()
-
-if names_list:
-    selected_person = st.selectbox("اختر الشخص اللي بدك تحذفه:", names_list)
-
-    if st.button("حذف الشخص المحدد", type="primary"):
-        # حذف السطر اللي فيه الاسم المختار
-        updated_df = df[df['Name'] != selected_person]
-        
-        # تحديث الجوجل شيت بالبيانات الجديدة
+    # --- قسم الحذف ---
+    st.divider()
+    st.subheader("🗑️ إزالة ملف من النظام")
+    person_to_delete = st.selectbox("اختر الاسم المراد حذفه:", df_display['Name'].tolist())
+    
+    if st.button("تأكيد الحذف", type="primary"):
+        updated_df = df_existing[df_existing['Name'] != person_to_delete]
         conn.update(worksheet="Sheet1", data=updated_df)
-        
-        st.success(f"تم حذف {selected_person} بنجاح!")
-        # إعادة تحميل الصفحة عشان يختفي الاسم فوراً
+        st.success(f"تم حذف {person_to_delete} من النظام.")
         st.rerun()
 else:
-    st.info("لا يوجد أشخاص مسجلين حالياً.")
+    st.info("النظام فارغ حالياً، ابدأ بإضافة الملفات من الأعلى.")
